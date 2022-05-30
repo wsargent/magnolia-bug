@@ -2,7 +2,7 @@ import java.time.Instant
 import java.util.Objects
 import scala.collection.Seq
 import com.tersesystems.echopraxia.api.{Field, Value}
-import magnolia1.Magnolia
+import magnolia1.{CaseClass, Magnolia, SealedTrait}
 
 import scala.language.experimental.macros
 
@@ -46,60 +46,38 @@ trait ValueTypeClasses {
   }
 }
 
-trait Derivation extends ValueTypeClasses {
+trait SemiAutoFieldBuilder extends ValueTypeClasses {
   type Typeclass[T] = ToValue[T]
 
-  type CaseClass[T]   = magnolia1.CaseClass[Typeclass, T]
-  type SealedTrait[T] = magnolia1.SealedTrait[Typeclass, T]
-
-  final def join[T](ctx: CaseClass[T]): Typeclass[T] = {
+  final def join[T](ctx: CaseClass[Typeclass, T]): Typeclass[T] = {
     if (ctx.isValueClass) {
-      joinValueClass(ctx)
+      val param = ctx.parameters.head
+      value => param.typeclass.toValue(param.dereference(value))
     } else if (ctx.isObject) {
-      joinCaseObject(ctx)
+      value => Value.string(value.toString)
     } else {
-      joinCaseClass(ctx)
+       obj => {
+        val fields: Seq[Field] = ctx.parameters.map { p =>
+          val name: String = p.label
+          val attribute = p.dereference(obj)
+          val typeclassInstance = Objects.requireNonNull(p.typeclass, "type class is null!")
+          val value: Value[_] = typeclassInstance.toValue(attribute)
+          Field.keyValue(name, value)
+        }
+        ToObjectValue(fields)
+      }
     }
-  }
-
-  // this is a regular case class
-  protected def joinCaseClass[T](ctx: CaseClass[T]): Typeclass[T] = { obj =>
-    val typeInfo = Field.keyValue("@type", ToValue(ctx.typeName.full))
-    val fields: Seq[Field] = ctx.parameters.map { p =>
-      val name: String = p.label
-      val attribute = p.dereference(obj)
-      val typeclassInstance = Objects.requireNonNull(p.typeclass, "type class is null!")
-      val value: Value[_] = typeclassInstance.toValue(attribute)
-      Field.keyValue(name, value)
-    }
-    ToObjectValue(typeInfo +: fields)
-  }
-
-  // this is a case object, we can't do anything with it.
-  protected def joinCaseObject[T](ctx: CaseClass[T]): Typeclass[T] = {
-    // ctx has no parameters, so we're better off just passing it straight through.
-    value => Value.string(value.toString)
-  }
-
-  // this is a value class aka AnyVal, we should pass it through.
-  protected def joinValueClass[T](ctx: CaseClass[T]): Typeclass[T] = {
-    val param = ctx.parameters.head
-    value => param.typeclass.toValue(param.dereference(value))
   }
 
   // this is a sealed trait
-  def split[T](ctx: SealedTrait[T]): Typeclass[T] = (value: T) => {
+  def split[T](ctx: SealedTrait[Typeclass, T]): Typeclass[T] = (value: T) => {
     ctx.split(value) { sub =>
       sub.typeclass.toValue(sub.cast(value))
     }
   }
-}
 
-trait SemiAutoDerivation extends Derivation {
   final def gen[T]: Typeclass[T] = macro Magnolia.gen[T]
-}
 
-trait SemiAutoFieldBuilder extends SemiAutoDerivation {
   implicit val paymentInfoToValue: ToValue[PaymentInfo] = gen[PaymentInfo]
   implicit val instantToValue: ToValue[Instant] = instant => ToValue(instant.toString)
   implicit val orderToValue: ToValue[Order] = gen[Order]
