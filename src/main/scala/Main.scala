@@ -26,23 +26,7 @@ trait ValueTypeClasses {
 
   object ToValue {
     def apply[T: ToValue](t: T): Value[_] = implicitly[ToValue[T]].toValue(t)
-    implicit val valueToValue: ToValue[Value[_]] = identity(_)
-    implicit def objectValueToValue[T: ToObjectValue]: ToValue[T] = ToObjectValue[T](_)
     implicit val stringToStringValue: ToValue[String] = (s: String) => Value.string(s)
-  }
-
-  trait ToObjectValue[-T] extends ToValue[T] {
-    def toValue(t: T): Value.ObjectValue
-  }
-
-  object ToObjectValue {
-    def apply[T: ToObjectValue](obj: T): Value.ObjectValue =
-      implicitly[ToObjectValue[T]].toValue(obj)
-
-    implicit val iterableToObjectValue: ToObjectValue[collection.Iterable[Field]] = t => Value.`object`(t.toArray: _*)
-
-    implicit val immutableIterableToObjectValue: ToObjectValue[collection.immutable.Iterable[Field]] =
-      t => Value.`object`(t.toArray: _*)
   }
 }
 
@@ -64,7 +48,7 @@ trait SemiAutoFieldBuilder extends ValueTypeClasses {
           val value: Value[_] = typeclassInstance.toValue(attribute)
           Field.keyValue(name, value)
         }
-        ToObjectValue(fields)
+         Value.`object`(fields.toArray: _*)
       }
     }
   }
@@ -78,8 +62,12 @@ trait SemiAutoFieldBuilder extends ValueTypeClasses {
 
   final def gen[T]: Typeclass[T] = macro Magnolia.gen[T]
 
+  // XXX succeeds when defined before paymentInfoToValue
+  //implicit val instantToValue: ToValue[Instant] = instant => Value.string(instant.toString)
   implicit val paymentInfoToValue: ToValue[PaymentInfo] = gen[PaymentInfo]
-  implicit val instantToValue: ToValue[Instant] = instant => ToValue(instant.toString)
+  // fails when defined _after_ paymentInfoToValue
+  implicit val instantToValue: ToValue[Instant] = instant => Value.string(instant.toString)
+
   implicit val orderToValue: ToValue[Order] = gen[Order]
 }
 object SemiAutoFieldBuilder extends SemiAutoFieldBuilder
